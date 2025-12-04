@@ -1,0 +1,230 @@
+// =========== СИСТЕМА ВВОДА ОТ ПОЛЬЗОВАТЕЛЯ ===========
+
+/**
+ * Класс InputSystem отвечает за взаимодействие с пользователем
+ * Собирает все необходимые параметры для симуляции
+ */
+class InputSystem {
+private:
+    /**
+     * Ввод вещественного числа с подсказкой. Пустой ввод не допускается.
+     */
+    double getDouble(const string& prompt) {
+        while (true) {
+            cout << prompt;
+            string input;
+            getline(cin, input);
+            if (!input.empty()) {
+                try {
+                    return stod(input);
+                } catch (const exception&) {
+                    cout << "Некорректный ввод. Пожалуйста, введите число.\n";
+                }
+            } else {
+                cout << "Ввод не может быть пустым. Пожалуйста, введите число.\n";
+            }
+        }
+    }
+
+    /**
+     * Ввод целого числа с подсказкой. Пустой ввод не допускается.
+     */
+    int getInt(const string& prompt) {
+        while (true) {
+            cout << prompt;
+            string input;
+            getline(cin, input);
+            if (!input.empty()) {
+                try {
+                    return stoi(input);
+                } catch (const exception&) {
+                    cout << "Некорректный ввод. Пожалуйста, введите целое число.\n";
+                }
+            } else {
+                cout << "Ввод не может быть пустым. Пожалуйста, введите целое число.\n";
+            }
+        }
+    }
+
+    /**
+     * Ввод трехмерного вектора с подсказкой.
+     */
+    Vector3 getVector3(const string& prompt) {
+        cout << prompt << endl;
+        double x = getDouble("  X: ");
+        double y = getDouble("  Y: ");
+        double z = getDouble("  Z: ");
+        return Vector3(x, y, z);
+    }
+
+    /**
+     * Выбор из меню с несколькими вариантами
+     */
+    int getChoice(const string& prompt, const vector<string>& options) {
+        cout << prompt << ":" << endl;
+        for (int i = 0; i < options.size(); i++) {
+            cout << "  " << (i + 1) << ". " << options[i] << endl;
+        }
+        while (true) {
+            int choice = getInt("Выберите вариант: ");
+            if (choice >= 1 && choice <= (int)options.size()) {
+                return choice - 1; // Возвращаем индекс (0-based)
+            }
+            cout << "Некорректный выбор. Пожалуйста, выберите от 1 до " << options.size() << ".\n";
+        }
+    }
+
+    /**
+     * Ввод географических координат от пользователя
+     */
+    GeoPosition getGeoPosition() {
+        cout << "\n--- Начальные географические координаты ---" << endl;
+        double lat = getDouble("Широта (градусы): ");
+        double lon = getDouble("Долгота (градусы): ");
+        double alt = getDouble("Высота над уровнем моря (метры): ");
+        return GeoPosition(lat, lon, alt);
+    }
+
+public:
+    /**
+     * Чтение конфигурации траектории от пользователя
+     */
+    TrajectoryConfig readScenarioConfig() {
+        cout << "\n=== НАСТРОЙКА ТРАЕКТОРИИ ===" << endl;
+
+        int source_choice = getChoice("Источник траектории", {
+            "Сгенерировать новую траекторию",
+            "Загрузить из файла"
+        });
+
+        TrajectoryConfig config;
+        config.source_type = (source_choice == 0) ? TrajectoryConfig::GENERATED : TrajectoryConfig::FROM_FILE;
+
+        if (config.source_type == TrajectoryConfig::FROM_FILE) {
+            cout << "Введите путь к файлу траектории: ";
+            getline(cin, config.file_path);
+            while (config.file_path.empty()) {
+                cout << "Путь не может быть пустым. Введите путь к файлу траектории: ";
+                getline(cin, config.file_path);
+            }
+            config.time_step = getDouble("Шаг времени для дискретизации (секунды): ");
+            config.start_geo_position = getGeoPosition();
+            return config;
+        }
+
+        config.time_step = getDouble("Шаг времени (секунды): ");
+        config.start_geo_position = getGeoPosition();
+
+        int segment_count = getInt("Количество сегментов траектории: ");
+
+        Vector3 current_pos = Vector3(0, 0, 0);
+        Vector3 current_vel = Vector3(0, 0, 0);
+
+        for (int i = 0; i < segment_count; i++) {
+            cout << "\n--- Сегмент " << (i + 1) << " ---" << endl;
+
+            int motion_type = getChoice("Тип движения", {
+                "Равномерное прямолинейное",
+                "Равноускоренное движение",
+                "Движение по окружности"
+            });
+
+            double duration = getDouble("Длительность сегмента (секунды): ");
+
+            TrajectorySegment segment(static_cast<MotionType>(motion_type), duration, current_pos);
+
+            switch (motion_type) {
+            case UNIFORM:
+                segment.start_velocity = getVector3("Начальная скорость (м/с):");
+                current_vel = segment.start_velocity;
+                current_pos = current_pos + segment.start_velocity * duration;
+                break;
+
+            case ACCELERATED:
+                segment.start_velocity = current_vel;
+                segment.acceleration = getVector3("Ускорение (м/с²):");
+                current_vel = current_vel + segment.acceleration * duration;
+                current_pos = current_pos + segment.start_velocity * duration + segment.acceleration * (duration * duration * 0.5);
+                break;
+
+            case CIRCULAR:
+                segment.center = current_pos;
+                segment.radius = getDouble("Радиус окружности (метры): ");
+                segment.angular_velocity = getDouble("Угловая скорость (рад/с): ");
+                current_vel = Vector3(0, 0, 0);
+                current_pos = segment.center + Vector3(segment.radius, 0, 0);
+                break;
+            }
+
+            config.segments.push_back(segment);
+        }
+
+        return config;
+    }
+
+    /**
+     * Создание и настройка датчиков
+     */
+    vector<shared_ptr<Sensor>> createSensors() {
+        cout << "\n=== НАСТРОЙКА ДАТЧИКОВ ===" << endl;
+
+        vector<shared_ptr<Sensor>> sensors;
+        int sensor_count = getInt("Количество датчиков: ");
+
+        for (int i = 0; i < sensor_count; i++) {
+            cout << "\n--- Датчик " << (i + 1) << " ---" << endl;
+
+            int sensor_type = getChoice("Тип датчика", {
+                "Акселерометр",
+                "Гироскоп",
+                "GNSS приемник"
+            });
+
+            double frequency = getDouble("Частота дискретизации (Гц): ");
+
+            shared_ptr<Sensor> sensor;
+
+            switch (sensor_type) {
+            case 0: // Акселерометр
+                sensor = make_shared<Accelerometer>(frequency);
+                double acc_bias = getDouble("Смещение нуля акселерометра: ");
+                double acc_noise = getDouble("Шум акселерометра: ");
+                sensor->addErrorModel(make_shared<BiasError>(acc_bias));
+                sensor->addErrorModel(make_shared<NoiseError>(acc_noise));
+                break;
+            case 1: // Гироскоп
+                sensor = make_shared<Gyroscope>(frequency);
+                double gyro_bias = getDouble("Смещение нуля гироскопа: ");
+                double gyro_noise = getDouble("Шум гироскопа: ");
+                sensor->addErrorModel(make_shared<BiasError>(gyro_bias));
+                sensor->addErrorModel(make_shared<NoiseError>(gyro_noise));
+                break;
+            case 2: // GNSS
+                sensor = make_shared<GNSS>(frequency);
+                double gnss_noise = getDouble("Шум GNSS: ");
+                sensor->addErrorModel(make_shared<NoiseError>(gnss_noise));
+                break;
+            }
+
+            sensors.push_back(sensor);
+        }
+
+        return sensors;
+    }
+
+    /**
+     * Получение имени файла для сохранения результатов
+     */
+    string getOutputFilename() {
+        cout << "\n=== СОХРАНЕНИЕ РЕЗУЛЬТАТОВ ===" << endl;
+        string filename;
+        while (filename.empty()) {
+            cout << "Имя файла для сохранения: ";
+            getline(cin, filename);
+            if (filename.empty()) {
+                cout << "Имя файла не может быть пустым.\n";
+            }
+        }
+        return filename;
+    }
+};
